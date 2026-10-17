@@ -106,12 +106,20 @@ pub fn detect_supplies() -> Vec<PowerSupply> {
 
 pub fn on_battery() -> bool {
     let supplies = detect_supplies();
-    !supplies
-        .iter()
-        .any(|s| matches!(s.supply_type, SupplyType::Mains) && s.status == PowerStatus::Charging)
-        && supplies
-            .iter()
-            .any(|s| matches!(s.supply_type, SupplyType::Battery))
+    // Check if any mains supply is online
+    let mut ac_online = false;
+    for s in &supplies {
+        if matches!(s.supply_type, SupplyType::Mains) {
+            let online_path = format!("{}/{}/online", POWER_SUPPLY_PATH, s.name);
+            if let Some(content) = read_file(Path::new(&online_path)) {
+                if content.trim() == "1" {
+                    ac_online = true;
+                    break;
+                }
+            }
+        }
+    }
+    !ac_online
 }
 
 pub fn battery_power_draw_watts() -> Option<f64> {
