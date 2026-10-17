@@ -1,10 +1,14 @@
 use serde::Deserialize;
 use std::fs;
 
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProfileConfig {
     pub governor: String,
     pub turbo: String,
+    pub charge_stop_threshold: Option<u32>,
+    pub charge_start_threshold: Option<u32>,
+    pub charge_behaviour: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -21,10 +25,16 @@ impl Default for Config {
             battery: ProfileConfig {
                 governor: "powersave".to_string(),
                 turbo: "never".to_string(),
+                charge_stop_threshold: None,
+                charge_start_threshold: None,
+                charge_behaviour: None,
             },
             charger: ProfileConfig {
                 governor: "performance".to_string(),
                 turbo: "auto".to_string(),
+                charge_stop_threshold: None,
+                charge_start_threshold: None,
+                charge_behaviour: None,
             },
             poll_interval_secs: 5,
             log_level: "info".to_string(),

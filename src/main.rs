@@ -1,7 +1,9 @@
+mod charge_control;
 mod config;
 mod cpu_governor;
 mod power_supply;
 
+use charge_control::ChargeControl;
 use config::Config;
 use cpu_governor::{Governor, set_governor_all, set_turbo};
 use power_supply::on_battery;
@@ -24,6 +26,20 @@ fn main() {
     }
 
     info!("battop starting...");
+
+    // Probe charge control hardware capabilities
+    let charge = ChargeControl::probe();
+    if charge.supported {
+        info!(
+            "charge control: end_threshold={}, start_threshold={}, behaviour={:?}",
+            charge.current_end_threshold.unwrap_or(0),
+            charge.current_start_threshold.unwrap_or(0),
+            charge.available_behaviours
+        );
+    } else {
+        info!("charge control: not supported on this hardware");
+    }
+
     info!(
         "config: battery governor={}, turbo={}; charger governor={}, turbo={}",
         config.battery.governor, config.battery.turbo,
@@ -54,10 +70,10 @@ fn main() {
 
             if battery {
                 info!("switched to battery mode");
-                apply_profile(&config.battery);
+                apply_profile(&config.battery, &charge);
             } else {
                 info!("switched to charger mode");
-                apply_profile(&config.charger);
+                apply_profile(&config.charger, &charge);
             }
         }
 
@@ -76,7 +92,7 @@ fn main() {
     info!("battop shutting down");
 }
 
-fn apply_profile(profile: &config::ProfileConfig) {
+fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl) {
     let governor = Governor::from_str(&profile.governor);
     info!(
         "applying profile: governor={}, turbo={}",
@@ -99,5 +115,44 @@ fn apply_profile(profile: &config::ProfileConfig) {
             }
         }
         _ => {}
+    }
+
+    // Apply charge thresholds if hardware supports it
+    apply_charge_thresholds(profile, charge);
+}
+
+fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeControl) {
+    if !charge.supported {
+        return;
+    }
+
+    if let Some(threshold) = profile.charge_stop_threshold {
+        if charge.has_end_threshold {
+            if let Err(e) = ChargeControl::set_end_threshold(threshold) {
+                log::warn!("failed to set charge stop threshold: {}", e);
+            } else {
+                info!("charge stop threshold set to {}%", threshold);
+            }
+        }
+    }
+
+    if let Some(threshold) = profile.charge_start_threshold {
+        if charge.has_start_threshold {
+            if let Err(e) = ChargeControl::set_start_threshold(threshold) {
+                log::warn!("failed to set charge start threshold: {}", e);
+            } else {
+                info!("charge start threshold set to {}%", threshold);
+            }
+        }
+    }
+
+    if let Some(ref behaviour) = profile.charge_behaviour {
+        if charge.has_behaviour {
+            if let Err(e) = ChargeControl::set_behaviour(behaviour) {
+                log::warn!("failed to set charge behaviour: {}", e);
+            } else {
+                info!("charge behaviour set to {}", behaviour);
+            }
+        }
     }
 }
