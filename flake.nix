@@ -11,7 +11,6 @@
         version = "0.1.0";
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
-        description = "Linux battery-aware CPU power management daemon";
         meta.mainProgram = "battop";
       };
 
@@ -70,14 +69,20 @@
             default = { };
           };
 
-          poll_interval_secs = lib.mkOption {
-            type = lib.types.int;
-            default = 5;
-          };
-
-          log_level = lib.mkOption {
-            type = lib.types.str;
-            default = "info";
+          general = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                poll_interval_secs = lib.mkOption {
+                  type = lib.types.int;
+                  default = 5;
+                };
+                log_level = lib.mkOption {
+                  type = lib.types.str;
+                  default = "info";
+                };
+              };
+            };
+            default = { };
           };
         };
 
@@ -89,10 +94,7 @@
               battery = config.services.battop.battery;
               charger = config.services.battop.charger;
               charge_control = config.services.battop.charge_control;
-              general = {
-                poll_interval_secs = config.services.battop.poll_interval_secs;
-                log_level = config.services.battop.log_level;
-              };
+              general = config.services.battop.general;
             };
 
           systemd.services.battop = {
