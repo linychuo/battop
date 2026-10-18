@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-const CPUFREQ_PATH: &str = "/sys/devices/system/cpu/cpu0/cpufreq";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Governor {
     Performance,
@@ -47,27 +45,13 @@ pub fn cpu_count() -> usize {
             entries
                 .flatten()
                 .filter(|e| {
-                    e.file_name()
-                        .to_string_lossy()
-                        .starts_with("cpu") && e.file_name().to_string_lossy().len() > 3
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    name.starts_with("cpu") && name[3..].chars().all(|c| c.is_ascii_digit())
                 })
                 .count()
         })
         .unwrap_or(1)
-}
-
-/// Get available governors for the CPU
-pub fn available_governors() -> Vec<Governor> {
-    let path = Path::new(CPUFREQ_PATH).join("scaling_available_governors");
-    fs::read_to_string(path)
-        .map(|s| s.split_whitespace().map(Governor::from_str).collect())
-        .unwrap_or_default()
-}
-
-/// Get current governor for a specific CPU core
-pub fn get_governor(cpu: usize) -> Option<Governor> {
-    let path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor", cpu);
-    fs::read_to_string(&path).ok().map(|s| Governor::from_str(&s))
 }
 
 /// Set governor for all CPU cores
@@ -78,24 +62,83 @@ pub fn set_governor_all(governor: Governor) -> std::io::Result<()> {
     }
 
     for cpu in 0..cpu_count() {
-        let path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor", cpu);
+        let path = format!(
+            "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor",
+            cpu
+        );
         fs::write(&path, gov_str)?;
     }
     Ok(())
 }
 
+/// Get the sysfs path for turbo boost control.
+/// Intel: /sys/devices/system/cpu/intel_pstate/no_turbo (inverted: 0 = turbo on)
+/// AMD:   /sys/devices/system/cpu/cpufreq/boost (1 = boost on)
+fn turbo_path() -> Option<&'static str> {
+    let intel = "/sys/devices/system/cpu/intel_pstate/no_turbo";
+    let amd = "/sys/devices/system/cpu/cpufreq/boost";
+    if Path::new(intel).exists() {
+        Some(intel)
+    } else if Path::new(amd).exists() {
+        Some(amd)
+    } else {
+        None
+    }
+}
+
+/// Detect whether we're on Intel or AMD for turbo control
+fn is_intel_turbo() -> bool {
+    Path::new("/sys/devices/system/cpu/intel_pstate/no_turbo").exists()
+}
+
 /// Get current turbo boost state
+#[allow(dead_code)]
 pub fn get_turbo() -> Option<bool> {
-    let path = "/sys/devices/system/cpu/intel_pstate/no_turbo";
-    fs::read_to_string(path).ok().map(|s| s.trim() == "0")
+    let path = turbo_path()?;
+    fs::read_to_string(path).ok().map(|s| {
+        if is_intel_turbo() {
+            s.trim() == "0" // Intel: no_turbo=0 means turbo enabled
+        } else {
+            s.trim() == "1" // AMD: boost=1 means boost enabled
+        }
+    })
 }
 
 /// Set turbo boost (true = enabled, false = disabled)
+/// Supports both Intel (no_turbo) and AMD (boost) sysfs interfaces.
 pub fn set_turbo(enabled: bool) -> std::io::Result<()> {
-    let path = "/sys/devices/system/cpu/intel_pstate/no_turbo";
-    if enabled {
-        fs::write(path, "0")
+    let path = turbo_path().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "turbo boost control not supported on this CPU",
+        )
+    })?;
+
+    if is_intel_turbo() {
+        // Intel: no_turbo. 0 = turbo on, 1 = turbo off
+        fs::write(path, if enabled { "0" } else { "1" })
     } else {
-        fs::write(path, "1")
+        // AMD: boost. 1 = boost on, 0 = boost off
+        fs::write(path, if enabled { "1" } else { "0" })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_governor_as_str() {
+        assert_eq!(Governor::Performance.as_str(), "performance");
+        assert_eq!(Governor::Powersave.as_str(), "powersave");
+        assert_eq!(Governor::Unknown.as_str(), "");
+    }
+
+    #[test]
+    fn test_governor_from_str() {
+        assert_eq!(Governor::from_str("performance"), Governor::Performance);
+        assert_eq!(Governor::from_str("powersave"), Governor::Powersave);
+        assert_eq!(Governor::from_str("  PERFORMANCE  "), Governor::Performance);
+        assert_eq!(Governor::from_str("invalid"), Governor::Unknown);
     }
 }

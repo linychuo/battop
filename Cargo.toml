@@ -6,7 +6,7 @@ description = "Linux battery-aware CPU power management daemon"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_ini = "0.2"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 signal-hook = "0.3"
 log = "0.4"
 env_logger = "0.11"

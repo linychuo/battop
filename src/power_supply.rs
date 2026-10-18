@@ -10,8 +10,6 @@ pub struct PowerSupply {
     pub status: PowerStatus,
     pub capacity: u32,
     pub power_now: u64,
-    pub energy_full: u64,
-    pub energy_now: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +52,7 @@ impl PowerStatus {
     }
 }
 
+/// Detect all power supplies. Call once per poll cycle for efficiency.
 pub fn detect_supplies() -> Vec<PowerSupply> {
     let mut supplies = Vec::new();
 
@@ -80,22 +79,12 @@ pub fn detect_supplies() -> Vec<PowerSupply> {
                     .and_then(|s| s.trim().parse().ok())
                     .unwrap_or(0);
 
-                let energy_full = read_file(&path.join("energy_full"))
-                    .and_then(|s| s.trim().parse().ok())
-                    .unwrap_or(0);
-
-                let energy_now = read_file(&path.join("energy_now"))
-                    .and_then(|s| s.trim().parse().ok())
-                    .unwrap_or(0);
-
                 supplies.push(PowerSupply {
                     name,
                     supply_type,
                     status,
                     capacity,
                     power_now,
-                    energy_full,
-                    energy_now,
                 });
             }
         }
@@ -104,33 +93,63 @@ pub fn detect_supplies() -> Vec<PowerSupply> {
     supplies
 }
 
-pub fn on_battery() -> bool {
-    let supplies = detect_supplies();
-    // Check if any mains supply is online
-    let mut ac_online = false;
-    for s in &supplies {
+/// Returns true if running on battery (no AC online).
+/// Uses pre-scanned supplies for efficiency.
+/// Falls back to battery status if AC online is not available.
+pub fn on_battery_with(supplies: &[PowerSupply]) -> bool {
+    let has_battery = supplies
+        .iter()
+        .any(|s| matches!(s.supply_type, SupplyType::Battery));
+    if !has_battery {
+        // No battery found (desktop) - default to battery profile
+        return true;
+    }
+
+    // Method 1: Check if any mains supply is online
+    let mut found_ac = false;
+    for s in supplies {
         if matches!(s.supply_type, SupplyType::Mains) {
             let online_path = format!("{}/{}/online", POWER_SUPPLY_PATH, s.name);
             if let Some(content) = read_file(Path::new(&online_path)) {
+                found_ac = true;
                 if content.trim() == "1" {
-                    ac_online = true;
-                    break;
+                    return false; // AC is online
                 }
             }
         }
     }
-    !ac_online
+
+    // If we found AC adapters but none are online, we're on battery
+    if found_ac {
+        return true;
+    }
+
+    // Method 2: Fallback - check battery status
+    for s in supplies {
+        if matches!(s.supply_type, SupplyType::Battery) {
+            match s.status {
+                PowerStatus::Discharging => return true,
+                PowerStatus::Charging | PowerStatus::Full => return false,
+                _ => {} // Unknown/NotCharging - keep checking
+            }
+        }
+    }
+
+    // Default: assume battery to be safe
+    true
 }
 
-pub fn battery_power_draw_watts() -> Option<f64> {
-    detect_supplies()
+/// Get battery power draw in watts (from cached supplies).
+pub fn battery_power_draw_watts(supplies: &[PowerSupply]) -> Option<f64> {
+    supplies
         .iter()
         .find(|s| matches!(s.supply_type, SupplyType::Battery))
         .map(|s| s.power_now as f64 / 1_000_000.0)
 }
 
-pub fn battery_capacity() -> Option<u32> {
-    detect_supplies()
+/// Get battery capacity percentage (from cached supplies).
+pub fn battery_capacity(supplies: &[PowerSupply]) -> Option<u32> {
+    supplies
         .iter()
         .find(|s| matches!(s.supply_type, SupplyType::Battery))
         .map(|s| s.capacity)
@@ -144,4 +163,59 @@ fn read_supply_type(path: &Path) -> SupplyType {
 
 fn read_file(path: &Path) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_supply_type_from_str() {
+        assert_eq!(SupplyType::from_str("Battery"), SupplyType::Battery);
+        assert_eq!(SupplyType::from_str("Mains"), SupplyType::Mains);
+        assert_eq!(SupplyType::from_str("USB"), SupplyType::Usb);
+        assert_eq!(SupplyType::from_str("foo"), SupplyType::Unknown);
+    }
+
+    #[test]
+    fn test_power_status_from_str() {
+        assert_eq!(PowerStatus::from_str("Charging"), PowerStatus::Charging);
+        assert_eq!(PowerStatus::from_str("Discharging"), PowerStatus::Discharging);
+        assert_eq!(PowerStatus::from_str("Full"), PowerStatus::Full);
+        assert_eq!(
+            PowerStatus::from_str("Not Charging"),
+            PowerStatus::NotCharging
+        );
+    }
+
+    #[test]
+    fn test_on_battery_no_battery() {
+        let supplies = vec![];
+        assert!(on_battery_with(&supplies));
+    }
+
+    #[test]
+    fn test_on_battery_discharging() {
+        let supplies = vec![PowerSupply {
+            name: "BAT0".to_string(),
+            supply_type: SupplyType::Battery,
+            status: PowerStatus::Discharging,
+            capacity: 50,
+            power_now: 10_000_000,
+        }];
+        assert!(on_battery_with(&supplies));
+    }
+
+    #[test]
+    fn test_on_battery_charging_fallback() {
+        // No AC online file, battery status says charging
+        let supplies = vec![PowerSupply {
+            name: "BAT0".to_string(),
+            supply_type: SupplyType::Battery,
+            status: PowerStatus::Charging,
+            capacity: 80,
+            power_now: 0,
+        }];
+        assert!(!on_battery_with(&supplies));
+    }
 }
