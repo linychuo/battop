@@ -1,6 +1,6 @@
 # Battop
 
-> **Linux 电池 & CPU 电源管理 daemon — Rust 实现，零依赖，~1MB**
+> **Linux battery & CPU power management daemon — Rust, zero dependencies, ~1MB binary**
 
 [![Build](https://img.shields.io/badge/build-rust-orange)](https://rust-lang.org)
 [![Platform](https://img.shields.io/badge/platform-linux-blue)](https://kernel.org)
@@ -8,40 +8,40 @@
 [![Deps](https://img.shields.io/badge/runtime%20dependencies-zero-success)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 
-[English](README.en.md) | 简体中文
+English | [简体中文](README.zh.md)
 
-Battop 是一个 Linux 电池感知的 CPU 电源管理守护进程，在插拔电时自动切换电源策略。
+Battop is a Linux battery-aware CPU power management daemon that automatically switches power profiles on AC/battery transitions.
 
-**为什么选 Battop 而不是 auto-cpufreq？**
+**Why Battop over auto-cpufreq?**
 
 | | Battop (Rust) | auto-cpufreq (Python) |
 |---|---|---|
-| 内存占用 | ~1 MB | ~40 MB+ |
-| 依赖 | 零（单个 binary） | Python + psutil + pyinotify + bash |
-| Governor 切换 | ✅ | ✅ |
-| Turbo 控制 | ✅ | ✅ |
+| Memory | ~1 MB | ~40 MB+ |
+| Dependencies | zero (single binary) | Python + psutil + pyinotify + bash |
+| Governor switching | ✅ | ✅ |
+| Turbo control | ✅ | ✅ |
 | EPP | ✅ | ✅ |
 | Platform Profile | ✅ | ❌ |
-| 频率上下限 | ✅ | ✅ |
-| 充电阈值 | ✅ | ✅ |
+| Frequency limits | ✅ | ✅ |
+| Charge thresholds | ✅ | ✅ |
 
 ---
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 编译
+# Build
 cargo build --release
 
-# 安装
+# Install
 sudo cp target/release/battop /usr/local/bin/
 sudo mkdir -p /etc/battop
 sudo cp battop.toml /etc/battop/
 
-# 运行 daemon
+# Run daemon
 sudo battop
 
-# 查看当前功耗状态（不需要 daemon）
+# Display live power stats (no daemon needed)
 sudo battop --stats
 ```
 
@@ -77,21 +77,21 @@ sudo battop --stats
 sudo nixos-rebuild switch
 ```
 
-## 特性
+## Features
 
-- **Governor 切换** — 电池/插电自动切换 CPU 调度策略
-- **Turbo 控制** — 电池时关闭睿频省电，插电时开启
-- **Platform Profile** — 固件级整机电源策略（CPU + 风扇 + 功耗墙协调）
-- **EPP** — 能效偏好微调（Intel Skylake+, AMD Zen 2+）
-- **频率限制** — 手动设定 CPU 频率上下限
-- **充电阈值** — 限制充电上限（如 80%）延长电池寿命
-- **零依赖** — 单个静态链接 binary，无 Python/库依赖
-- **systemd 集成** — watchdog 保活，优雅关闭
-- **`--stats`** — 实时查看功率/频率/温度
+- **Governor switching** — auto switch CPU governor on AC/battery transitions
+- **Turbo control** — disable boost on battery, enable on charger
+- **Platform Profile** — firmware-level power profile (CPU + fan + TDP coordination)
+- **EPP** — Energy Performance Preference tuning (Intel Skylake+, AMD Zen 2+)
+- **Frequency limits** — manually cap CPU frequency range
+- **Charge thresholds** — limit max charge (e.g., 80%) to preserve battery health
+- **Zero dependencies** — single statically-linked binary, no Python or library deps
+- **systemd integration** — watchdog keepalive, graceful shutdown
+- **`--stats`** — real-time power/frequency/temperature display
 
-## 配置
+## Configuration
 
-配置文件：`~/.config/battop/battop.toml` 或 `/etc/battop/battop.toml`
+Config file: `~/.config/battop/battop.toml` or `/etc/battop/battop.toml`
 
 ```toml
 [battery]
@@ -108,8 +108,8 @@ energy_performance_preference = "balance_performance"
 platform_profile = "performance"
 
 [charge_control]
-stop_threshold = 80   # 充到 80% 停止
-start_threshold = 70  # 用到 70% 开始充
+stop_threshold = 80   # stop charging at 80%
+start_threshold = 70  # start charging at 70%
 behaviour = "auto"
 
 [general]
@@ -117,32 +117,32 @@ poll_interval_secs = 5
 log_level = "info"
 ```
 
-### 配置项参考
+### Config Reference
 
-| 选项 | 值 | 默认 |
+| Option | Values | Default |
 |---|---|---|
 | `battery/charger.governor` | performance, powersave, conservative, ondemand, userspace, schedutil | — |
 | `battery/charger.turbo` | never, auto | — |
-| `battery/charger.energy_performance_preference` | performance, balance_performance, balance_power, power | 硬件默认 |
-| `battery/charger.platform_profile` | low-power, balanced, balanced-performance, performance, quiet, cool, power | 硬件默认 |
-| `battery/charger.max_freq` | 整数 kHz | 硬件默认 |
-| `battery/charger.min_freq` | 整数 kHz | 硬件默认 |
-| `charge_control.stop_threshold` | 0-100 | 禁用 |
-| `charge_control.start_threshold` | 0-100 | 禁用 |
+| `battery/charger.energy_performance_preference` | performance, balance_performance, balance_power, power | hardware default |
+| `battery/charger.platform_profile` | low-power, balanced, balanced-performance, performance, quiet, cool, power | hardware default |
+| `battery/charger.max_freq` | integer kHz | hardware default |
+| `battery/charger.min_freq` | integer kHz | hardware default |
+| `charge_control.stop_threshold` | 0-100 | disabled |
+| `charge_control.start_threshold` | 0-100 | disabled |
 | `charge_control.behaviour` | auto, inhibit-charge, force-discharge | — |
 | `general.poll_interval_secs` | ≥1 | 5 |
 
 ## CLI
 
 ```
--c, --config <PATH>    配置文件路径
-    --stats            显示实时功耗状态（不需要 daemon）
-    --dry-run          验证配置并退出
--h, --help             帮助
--v, --version          版本
+-c, --config <PATH>    Config file path
+    --stats            Display live power stats (no daemon needed)
+    --dry-run          Validate config and exit
+-h, --help             Help
+-v, --version          Version
 ```
 
-### `--stats` 示例输出
+### `--stats` Example
 
 ```
   Battop 0.1.0 — System Stats
@@ -159,17 +159,17 @@ log_level = "info"
   EPP:            balance_power
 ```
 
-## 硬件兼容性
+## Hardware Compatibility
 
-| 功能 | 要求 |
+| Feature | Requirement |
 |---|---|
-| Governor | 所有 Linux 系统 |
-| Turbo | Intel / AMD 带睿频的 CPU |
-| EPP | Intel Skylake+ 或 AMD Zen 2+ |
-| Platform Profile | ~2020 年后的笔记本（ACPI 6.3+） |
-| 充电阈值 | 部分笔记本内核驱动支持（charge_control_threshold） |
+| Governor | All Linux systems |
+| Turbo | Intel / AMD CPUs with boost |
+| EPP | Intel Skylake+ or AMD Zen 2+ |
+| Platform Profile | ~2020+ laptops (ACPI 6.3+) |
+| Charge thresholds | Laptop kernel driver with charge_control_threshold |
 
-不支持的功能会在启动时自动检测并跳过，不会影响其他功能。
+Unsupported features are auto-detected and silently skipped. Your hardware won't break — battop logs what's available and uses what it can.
 
 ## License
 
