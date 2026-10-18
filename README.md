@@ -84,7 +84,7 @@ sudo nixos-rebuild switch
 - **Platform Profile** — firmware-level power profile (CPU + fan + TDP coordination)
 - **EPP** — Energy Performance Preference tuning (Intel Skylake+, AMD Zen 2+)
 - **Frequency limits** — manually cap CPU frequency range
-- **Charge thresholds** — limit max charge (e.g., 80%) to preserve battery health
+- **Charge thresholds** — limit max charge (e.g., 80%) to preserve battery health (persistent on ThinkPad)
 - **Zero dependencies** — single statically-linked binary, no Python or library deps
 - **systemd integration** — watchdog keepalive, graceful shutdown
 - **`--stats`** — real-time power/frequency/temperature display
@@ -170,6 +170,43 @@ log_level = "info"
 | Charge thresholds | Laptop kernel driver with charge_control_threshold |
 
 Unsupported features are auto-detected and silently skipped. Your hardware won't break — battop logs what's available and uses what it can.
+
+## Charge Control Persistence
+
+Charge threshold behavior depends on your laptop's kernel driver:
+
+| Driver | Persistence | Behavior while powered off |
+|---|---|---|
+| `thinkpad_acpi` (ThinkPad) | EC NVRAM (persistent) | Threshold is respected by EC firmware — battery won't charge past the limit even when the system is off and plugged in |
+| Other drivers | Runtime only | Threshold resets on power off — battery may charge to 100% when the system is off and plugged in |
+
+### How to check
+
+```bash
+# Check which kernel driver provides your battery
+lsmod | grep -E "thinkpad_acpi|battery"
+
+# Check if your hardware supports charge thresholds
+ls /sys/class/power_supply/BAT0/charge_control_end_threshold
+
+# Check current threshold value
+cat /sys/class/power_supply/BAT0/charge_control_end_threshold
+```
+
+### What battop does on each platform
+
+- **ThinkPad**: battop writes the threshold via sysfs, `thinkpad_acpi` stores it in EC NVRAM. The setting survives reboots, power cycles, and shutdown charging.
+- **Other laptops**: battop writes the threshold at startup. The setting is effective while the OS is running. battop re-applies the threshold on every boot.
+
+### Tested models
+
+| Model | Driver | Persistent |
+|---|---|---|
+| ThinkPad T14 / T16 / X1 Carbon / P-series | `thinkpad_acpi` | ✅ Yes |
+| Other ThinkPad models | `thinkpad_acpi` | ✅ Yes |
+| Dell / HP / ASUS / etc. | Varies | Check `lsmod` |
+
+> **Note**: Even on non-ThinkPad laptops, battop still protects your battery during normal use. The limitation only applies when the laptop is powered off and plugged in for charging.
 
 ## License
 

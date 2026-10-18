@@ -84,7 +84,7 @@ sudo nixos-rebuild switch
 - **Platform Profile** — 固件级整机电源策略（CPU + 风扇 + 功耗墙协调）
 - **EPP** — 能效偏好微调（Intel Skylake+, AMD Zen 2+）
 - **频率限制** — 手动设定 CPU 频率上下限
-- **充电阈值** — 限制充电上限（如 80%）延长电池寿命
+- **充电阈值** — 限制充电上限（如 80%）延长电池寿命（ThinkPad 上持久化）
 - **零依赖** — 单个静态链接 binary，无 Python/库依赖
 - **systemd 集成** — watchdog 保活，优雅关闭
 - **`--stats`** — 实时查看功率/频率/温度
@@ -170,6 +170,43 @@ log_level = "info"
 | 充电阈值 | 部分笔记本内核驱动支持（charge_control_threshold） |
 
 不支持的功能会在启动时自动检测并跳过，不会影响其他功能。
+
+## 充电阈值持久化
+
+充电阈值的行为取决于笔记本的内核驱动：
+
+| 驱动 | 持久性 | 关机后的行为 |
+|---|---|---|
+| `thinkpad_acpi`（ThinkPad） | EC NVRAM（持久） | EC 固件遵守阈值，即使关机插电也不会超过限制 |
+| 其他驱动 | 仅运行时 | 关机后阈值重置，关机插电可能充到 100% |
+
+### 如何检查
+
+```bash
+# 查看哪个内核驱动提供了电池接口
+lsmod | grep -E "thinkpad_acpi|battery"
+
+# 查看硬件是否支持充电阈值
+ls /sys/class/power_supply/BAT0/charge_control_end_threshold
+
+# 查看当前阈值
+cat /sys/class/power_supply/BAT0/charge_control_end_threshold
+```
+
+### battop 在不同平台上的行为
+
+- **ThinkPad**：battop 通过 sysfs 写入阈值，`thinkpad_acpi` 存储到 EC NVRAM。设置可以跨越重启、断电、关机充电。
+- **其他笔记本**：battop 启动时写入阈值，仅在系统运行时有效。每次启动 battop 都会重新应用阈值。
+
+### 已验证机型
+
+| 型号 | 驱动 | 持久化 |
+|---|---|---|
+| ThinkPad T14 / T16 / X1 Carbon / P 系列 | `thinkpad_acpi` | ✅ 是 |
+| 其他 ThinkPad 机型 | `thinkpad_acpi` | ✅ 是 |
+| Dell / HP / ASUS 等 | 视驱动而定 | 请用 `lsmod` 确认 |
+
+> **注意**：即使在非 ThinkPad 笔记本上，battop 仍然能在正常使用时保护电池。限制仅在笔记本关机且插电充电时才会出现。
 
 ## License
 
