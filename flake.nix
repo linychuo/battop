@@ -82,12 +82,12 @@
               description = "Turbo boost mode when on battery (never or auto).";
             };
             chargeStopThreshold = lib.mkOption {
-              type = lib.types.nullOr lib.types.ints.between 0 100;
+              type = lib.types.nullOr (lib.types.addCheck lib.types.int (v: v >= 0 && v <= 100));
               default = 80;
               description = "Stop charging at this percentage (0-100, null to disable).";
             };
             chargeStartThreshold = lib.mkOption {
-              type = lib.types.nullOr lib.types.ints.between 0 100;
+              type = lib.types.nullOr (lib.types.addCheck lib.types.int (v: v >= 0 && v <= 100));
               default = 40;
               description = "Start charging at this percentage (0-100, null to disable).";
             };
@@ -110,12 +110,12 @@
               description = "Turbo boost mode when on charger (never or auto).";
             };
             chargeStopThreshold = lib.mkOption {
-              type = lib.types.nullOr lib.types.ints.between 0 100;
+              type = lib.types.nullOr (lib.types.addCheck lib.types.int (v: v >= 0 && v <= 100));
               default = 100;
               description = "Stop charging at this percentage when on AC (0-100, null to disable).";
             };
             chargeStartThreshold = lib.mkOption {
-              type = lib.types.nullOr lib.types.ints.between 0 100;
+              type = lib.types.nullOr (lib.types.addCheck lib.types.int (v: v >= 0 && v <= 100));
               default = 0;
               description = "Start charging at this percentage when on AC (0-100, null to disable).";
             };
@@ -127,7 +127,7 @@
           };
 
           pollIntervalSecs = lib.mkOption {
-            type = lib.types.ints.positive;
+            type = lib.types.addCheck lib.types.int (v: v > 0);
             default = 5;
             description = "How often to poll power supply status (seconds).";
           };
@@ -168,10 +168,10 @@
 
               # sd_notify
               NotifyAccess = "main";
-            };
 
-            # Need root for sysfs writes
-            serviceConfig.User = lib.mkForce "root";
+              # Need root for sysfs writes
+              User = "root";
+            };
           };
         };
       };
