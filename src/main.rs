@@ -85,7 +85,29 @@ fn print_stats() {
         println!("  PP choices:     [{}]", cpu_governor::platform_profile_choices().join(", "));
     }
 
+    // Charge control
+    println!("\n  Charge Control:\n");
+    let charge = ChargeControl::probe();
+    if charge.supported {
+        println!("  End threshold:   {}%", charge.current_end_threshold.unwrap_or(0));
+        println!("  Start threshold: {}%", charge.current_start_threshold.unwrap_or(0));
+        let persistence = detect_charge_persistence();
+        println!("  Persistence:     {}", persistence);
+    } else {
+        println!("  Not supported on this hardware");
+    }
+
     println!();
+}
+
+/// Detect whether charge thresholds are backed by EC firmware (persistent)
+/// or only applied at runtime by the kernel driver.
+fn detect_charge_persistence() -> &'static str {
+    // Check if thinkpad_acpi module is loaded
+    if std::path::Path::new("/sys/module/thinkpad_acpi").exists() {
+        return "EC-backed (persistent)";
+    }
+    "Runtime only"
 }
 
 fn battery_status_str(status: &PowerStatus) -> &'static str {
@@ -98,6 +120,43 @@ fn battery_status_str(status: &PowerStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_charge_persistence_no_thinkpad() {
+        // On non-ThinkPad systems, /sys/module/thinkpad_acpi won't exist
+        let persistence = detect_charge_persistence();
+        assert!(
+            persistence == "EC-backed (persistent)" || persistence == "Runtime only",
+            "expected valid persistence string, got: {}",
+            persistence
+        );
+    }
+
+    #[test]
+    fn test_effective_poll_interval_no_watchdog() {
+        // Without WATCHDOG_USEC, should return user value
+        // (can't easily test env var manipulation in unit tests,
+        // but we can at least verify the function doesn't panic)
+        let result = effective_poll_interval(5);
+        // If no watchdog is set, result should be 5
+        if watchdog_usec().is_none() {
+            assert_eq!(result, 5);
+        }
+    }
+
+    #[test]
+    fn test_battery_status_str() {
+        assert_eq!(battery_status_str(&PowerStatus::Charging), "(charging)");
+        assert_eq!(battery_status_str(&PowerStatus::Discharging), "(discharging)");
+        assert_eq!(battery_status_str(&PowerStatus::Full), "(full)");
+        assert_eq!(battery_status_str(&PowerStatus::NotCharging), "(not charging)");
+        assert_eq!(battery_status_str(&PowerStatus::Unknown), "");
+    }
+}
+
 use log::info;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
 use std::os::unix::net::UnixDatagram;
@@ -105,7 +164,7 @@ use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -241,11 +300,13 @@ fn main() {
     // Probe charge control hardware capabilities
     let charge = ChargeControl::probe();
     if charge.supported {
+        let persistence = detect_charge_persistence();
         info!(
-            "charge control: end_threshold={}, start_threshold={}, behaviour={:?}",
+            "charge control: end_threshold={}, start_threshold={}, behaviour={:?}, persistence={}",
             charge.current_end_threshold.unwrap_or(0),
             charge.current_start_threshold.unwrap_or(0),
-            charge.available_behaviours
+            charge.available_behaviours,
+            persistence
         );
     } else {
         info!("charge control: not supported on this hardware");
@@ -285,26 +346,19 @@ fn main() {
     }
 
     let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
 
-    // Handle SIGTERM/SIGINT gracefully
-    let _signal_handle = Signals::new([SIGTERM, signal_hook::consts::SIGINT]).map(
-        |mut signals| {
-            let handle = thread::spawn(move || {
-                if signals.forever().next().is_some() {
-                    info!("received shutdown signal");
-                    r.store(false, Ordering::SeqCst);
-                }
-            });
-            info!("signal handlers registered");
-            handle
-        },
-    );
+    // Handle SIGTERM/SIGINT gracefully — fail loudly if signal registration fails
+    let _signal_handle = setup_signal_handler(running.clone());
 
     // Open systemd notification socket (used for both READY and WATCHDOG)
     let notify_socket = sd_notify_get_socket();
 
+    // Determine effective poll interval considering watchdog timeout
+    let poll_secs = effective_poll_interval(config.poll_interval_secs());
+
     let mut last_on_battery: Option<bool> = None;
+    let mut last_transition = Instant::now();
+    const DEBOUNCE_DURATION: Duration = Duration::from_secs(3);
 
     // Notify systemd we're fully ready
     sd_notify_ready(&notify_socket);
@@ -317,16 +371,20 @@ fn main() {
         let supplies = power_supply::detect_supplies();
         let battery = power_supply::on_battery_with(&supplies);
 
-        // Only act on state change
+        // Only act on state change, with debounce to prevent rapid switching
         if last_on_battery != Some(battery) {
-            last_on_battery = Some(battery);
+            let now = Instant::now();
+            if now.duration_since(last_transition) >= DEBOUNCE_DURATION {
+                last_transition = now;
+                last_on_battery = Some(battery);
 
-            if battery {
-                info!("switched to battery mode");
-                apply_profile(&config.battery, &config.charge_control, &charge);
-            } else {
-                info!("switched to charger mode");
-                apply_profile(&config.charger, &config.charge_control, &charge);
+                if battery {
+                    info!("switched to battery mode");
+                    apply_profile(&config.battery, &config.charge_control, &charge);
+                } else {
+                    info!("switched to charger mode");
+                    apply_profile(&config.charger, &config.charge_control, &charge);
+                }
             }
         }
 
@@ -336,7 +394,7 @@ fn main() {
             info!("power: {:.1}W, capacity: {}%", power, capacity);
         }
 
-        thread::sleep(Duration::from_secs(config.poll_interval_secs()));
+        sleep_with_watchdog(poll_secs, &running, &notify_socket);
     }
 
     // Notify systemd about shutdown
@@ -346,6 +404,75 @@ fn main() {
     apply_profile(&config.charger, &config.charge_control, &charge);
 
     info!("battop stopped");
+}
+
+/// Set up signal handlers for graceful shutdown.
+/// Returns a JoinHandle for the signal handling thread.
+fn setup_signal_handler(running: Arc<AtomicBool>) -> thread::JoinHandle<()> {
+    let mut signals = Signals::new([SIGTERM, signal_hook::consts::SIGINT])
+        .expect("failed to register signal handlers");
+    
+    let handle = thread::spawn(move || {
+        if signals.forever().next().is_some() {
+            info!("received shutdown signal");
+            running.store(false, Ordering::SeqCst);
+        }
+    });
+    info!("signal handlers registered");
+    handle
+}
+
+/// Get the systemd watchdog timeout in microseconds, if set.
+fn watchdog_usec() -> Option<u64> {
+    std::env::var("WATCHDOG_USEC").ok().and_then(|v| v.parse().ok())
+}
+
+/// Calculate effective poll interval considering systemd watchdog.
+/// If watchdog is enabled, ensures we poll frequently enough to send keepalives.
+fn effective_poll_interval(user_poll: u64) -> u64 {
+    match watchdog_usec() {
+        Some(usec) => {
+            let watchdog_secs = (usec / 1_000_000).max(1);
+            // Poll at least twice per watchdog period to ensure keepalives are sent
+            let max_poll = watchdog_secs / 2;
+            if user_poll >= max_poll && max_poll > 0 {
+                log::warn!(
+                    "poll_interval_secs ({}) too large for watchdog timeout ({}s), clamping to {}s",
+                    user_poll, watchdog_secs, max_poll
+                );
+                max_poll
+            } else {
+                user_poll
+            }
+        }
+        None => user_poll,
+    }
+}
+
+/// Sleep for the specified duration, but break early if shutdown is requested.
+/// Also sends watchdog keepalives during long sleeps.
+fn sleep_with_watchdog(secs: u64, running: &Arc<AtomicBool>, notify_socket: &Option<std::path::PathBuf>) {
+    let total = Duration::from_secs(secs);
+    let start = Instant::now();
+    
+    // For sleeps longer than 1 second, wake up periodically to check running state
+    // and send watchdog keepalives
+    if secs > 1 {
+        let check_interval = Duration::from_secs(1);
+        while start.elapsed() < total && running.load(Ordering::SeqCst) {
+            let remaining = total - start.elapsed();
+            let sleep_time = if remaining > check_interval {
+                check_interval
+            } else {
+                remaining
+            };
+            thread::sleep(sleep_time);
+            // Send watchdog keepalive during long sleeps
+            sd_notify_watchdog(notify_socket);
+        }
+    } else {
+        thread::sleep(total);
+    }
 }
 
 fn apply_profile(

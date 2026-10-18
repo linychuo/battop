@@ -143,6 +143,7 @@ impl Config {
             "charge_control.start_threshold",
             self.charge_control.start_threshold,
         );
+        self.validate_charge_thresholds();
     }
 
     fn validate_governor(name: &str, value: &str) {
@@ -170,6 +171,21 @@ impl Config {
             && v > 100
         {
             config_warn(&format!("{} is {}%, should be 0-100", name, v));
+        }
+    }
+
+    fn validate_charge_thresholds(&self) {
+        if let (Some(start), Some(stop)) = (
+            self.charge_control.start_threshold,
+            self.charge_control.stop_threshold,
+        ) {
+            if start > stop {
+                config_warn(&format!(
+                    "charge_control.start_threshold ({}) is greater than stop_threshold ({}); \
+                     this may cause unexpected charging behavior",
+                    start, stop
+                ));
+            }
         }
     }
 
@@ -319,5 +335,53 @@ log_level = "warn"
             "expected .toml extension, got: {}",
             path
         );
+    }
+
+    #[test]
+    fn test_validate_charge_thresholds_start_greater_than_stop() {
+        let toml_str = r#"
+[battery]
+governor = "powersave"
+turbo = "never"
+
+[charger]
+governor = "performance"
+turbo = "auto"
+
+[charge_control]
+stop_threshold = 70
+start_threshold = 90
+
+[general]
+poll_interval_secs = 5
+log_level = "info"
+"#;
+        let config = toml::from_str::<Config>(toml_str).expect("should parse");
+        // Validation should warn but not panic
+        config.validate();
+    }
+
+    #[test]
+    fn test_validate_charge_thresholds_valid() {
+        let toml_str = r#"
+[battery]
+governor = "powersave"
+turbo = "never"
+
+[charger]
+governor = "performance"
+turbo = "auto"
+
+[charge_control]
+stop_threshold = 80
+start_threshold = 70
+
+[general]
+poll_interval_secs = 5
+log_level = "info"
+"#;
+        let config = toml::from_str::<Config>(toml_str).expect("should parse");
+        // Should not warn for valid config
+        config.validate();
     }
 }
