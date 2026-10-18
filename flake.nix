@@ -19,6 +19,12 @@
         pkg = self.packages.x86_64-linux.default;
         toml = pkgs.formats.toml { };
 
+        eppType = lib.types.nullOr (lib.types.enum [
+          "performance" "balance_performance" "balance_power" "power"
+        ]);
+
+        freqType = lib.types.nullOr lib.types.ints.positive;
+
         profileType = lib.types.submodule {
           options = {
             governor = lib.mkOption {
@@ -28,6 +34,18 @@
             turbo = lib.mkOption {
               type = lib.types.enum [ "never" "auto" ];
               default = "never";
+            };
+            energy_performance_preference = lib.mkOption {
+              type = eppType;
+              default = null;
+            };
+            max_freq = lib.mkOption {
+              type = freqType;
+              default = null;
+            };
+            min_freq = lib.mkOption {
+              type = freqType;
+              default = null;
             };
           };
         };
@@ -89,10 +107,24 @@
         config = lib.mkIf config.services.battop.enable {
           environment.systemPackages = [ pkg ];
 
+          # Build profile sections with optional fields
+          mkProfile = profile: {
+            inherit (profile) governor turbo;
+          }
+            // lib.optionalAttrs (profile.energy_performance_preference != null) {
+              energy_performance_preference = profile.energy_performance_preference;
+            }
+            // lib.optionalAttrs (profile.max_freq != null) {
+              max_freq = profile.max_freq;
+            }
+            // lib.optionalAttrs (profile.min_freq != null) {
+              min_freq = profile.min_freq;
+            };
+
           environment.etc."battop/battop.toml".source =
             toml.generate "battop.toml" {
-              battery = config.services.battop.battery;
-              charger = config.services.battop.charger;
+              battery = mkProfile config.services.battop.battery;
+              charger = mkProfile config.services.battop.charger;
               charge_control = config.services.battop.charge_control;
               general = config.services.battop.general;
             };

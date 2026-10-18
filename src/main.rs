@@ -5,7 +5,7 @@ mod power_supply;
 
 use charge_control::ChargeControl;
 use config::Config;
-use cpu_governor::{set_governor_all, set_turbo, Governor};
+use cpu_governor::{set_epp, set_governor_all, set_max_freq, set_min_freq, set_turbo, EnergyPerfPref, Governor};
 
 
 use log::info;
@@ -155,6 +155,18 @@ fn main() {
         config.charger.governor, config.charger.turbo
     );
 
+    // Probe and log hardware capabilities
+    info!(
+        "hardware: EPP supported={}, available values={:?}",
+        EnergyPerfPref::is_supported(),
+        EnergyPerfPref::available_values()
+    );
+    info!(
+        "hardware: frequency limits: min={:?} kHz, max={:?} kHz",
+        cpu_governor::freq_min_limit_hz(),
+        cpu_governor::freq_max_limit_hz()
+    );
+
     // Check if running on a system without battery (desktop)
     let supplies = power_supply::detect_supplies();
     let has_battery = supplies
@@ -249,6 +261,36 @@ fn apply_profile(
 
     if let Err(e) = set_governor_all(governor) {
         log::error!("failed to set governor: {}", e);
+    }
+
+    // ── EPP (Energy Performance Preference) ──────────────────────
+    if let Some(ref epp_str) = profile.energy_performance_preference {
+        let epp = EnergyPerfPref::from_str(epp_str);
+        if matches!(epp, EnergyPerfPref::Unknown) {
+            log::warn!("invalid EPP '{}', skipping", epp_str);
+        } else if !EnergyPerfPref::is_supported() {
+            log::info!("EPP not supported on this hardware, skipping");
+        } else if let Err(e) = set_epp(epp) {
+            log::warn!("failed to set EPP '{}': {}", epp_str, e);
+        } else {
+            info!("set EPP to '{}'", epp_str);
+        }
+    }
+
+    // ── CPU Frequency Limits ───────────────────────────────────────
+    if let Some(freq_khz) = profile.max_freq {
+        if let Err(e) = set_max_freq(freq_khz) {
+            log::warn!("failed to set max_freq {} kHz: {}", freq_khz, e);
+        } else {
+            info!("set max CPU frequency to {} MHz", freq_khz / 1000);
+        }
+    }
+    if let Some(freq_khz) = profile.min_freq {
+        if let Err(e) = set_min_freq(freq_khz) {
+            log::warn!("failed to set min_freq {} kHz: {}", freq_khz, e);
+        } else {
+            info!("set min CPU frequency to {} MHz", freq_khz / 1000);
+        }
     }
 
     match profile.turbo.as_str() {

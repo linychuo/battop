@@ -1,6 +1,141 @@
 use std::fs;
 use std::path::Path;
 
+// ── EPP (Energy Performance Preference) ──────────────────────────────
+// Available on Intel (Skylake+) and AMD (Zen 2+) with `schedutil`/`performance` governors
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnergyPerfPref {
+    Performance,
+    BalancePerformance,
+    BalancePower,
+    Power,
+    Unknown,
+}
+
+impl EnergyPerfPref {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Performance => "performance",
+            Self::BalancePerformance => "balance_performance",
+            Self::BalancePower => "balance_power",
+            Self::Power => "power",
+            Self::Unknown => "",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "performance" => Self::Performance,
+            "balance_performance" => Self::BalancePerformance,
+            "balance_power" => Self::BalancePower,
+            "power" => Self::Power,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Probe the first CPU core for supported EPP values
+    pub fn available_values() -> Vec<String> {
+        let path = "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_available_preferences";
+        match fs::read_to_string(path) {
+            Ok(content) => content
+                .split_whitespace()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    pub fn is_supported() -> bool {
+        Path::new("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference").exists()
+    }
+}
+
+/// Set EPP for all CPU cores. No-op if unsupported.
+pub fn set_epp(epp: EnergyPerfPref) -> std::io::Result<()> {
+    let value = epp.as_str();
+    if value.is_empty() {
+        return Ok(());
+    }
+    for cpu in 0..cpu_count() {
+        let path = format!(
+            "/sys/devices/system/cpu/cpu{}/cpufreq/energy_performance_preference",
+            cpu
+        );
+        if Path::new(&path).exists() {
+            fs::write(&path, value)?;
+        }
+    }
+    Ok(())
+}
+
+/// Read current EPP from cpu0
+#[allow(dead_code)]
+pub fn get_epp() -> Option<EnergyPerfPref> {
+    let path = "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference";
+    fs::read_to_string(path)
+        .ok()
+        .map(|s| EnergyPerfPref::from_str(&s))
+}
+
+// ── CPU Frequency Limits ──────────────────────────────────────────────
+// Set scaling_min_freq / scaling_max_freq in kHz.
+
+/// Get the absolute minimum frequency limit (from cpuinfo_min_freq)
+pub fn freq_min_limit_hz() -> Option<u64> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Get the absolute maximum frequency limit (from cpuinfo_max_freq)
+pub fn freq_max_limit_hz() -> Option<u64> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Set scaling_max_freq for all cores (value in kHz)
+pub fn set_max_freq(freq_khz: u64) -> std::io::Result<()> {
+    for cpu in 0..cpu_count() {
+        let path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_max_freq", cpu);
+        if Path::new(&path).exists() {
+            fs::write(&path, freq_khz.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Set scaling_min_freq for all cores (value in kHz)
+pub fn set_min_freq(freq_khz: u64) -> std::io::Result<()> {
+    for cpu in 0..cpu_count() {
+        let path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_min_freq", cpu);
+        if Path::new(&path).exists() {
+            fs::write(&path, freq_khz.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Read current scaling_max_freq from cpu0 (kHz)
+#[allow(dead_code)]
+pub fn get_max_freq() -> Option<u64> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Read current scaling_min_freq from cpu0 (kHz)
+#[allow(dead_code)]
+pub fn get_min_freq() -> Option<u64> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+// ── Governor & Turbo ──────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Governor {
     Performance,
@@ -140,5 +275,28 @@ mod tests {
         assert_eq!(Governor::from_str("powersave"), Governor::Powersave);
         assert_eq!(Governor::from_str("  PERFORMANCE  "), Governor::Performance);
         assert_eq!(Governor::from_str("invalid"), Governor::Unknown);
+    }
+
+    #[test]
+    fn test_epp_as_str() {
+        assert_eq!(EnergyPerfPref::Performance.as_str(), "performance");
+        assert_eq!(EnergyPerfPref::BalancePower.as_str(), "balance_power");
+        assert_eq!(EnergyPerfPref::Unknown.as_str(), "");
+    }
+
+    #[test]
+    fn test_epp_from_str() {
+        assert_eq!(EnergyPerfPref::from_str("performance"), EnergyPerfPref::Performance);
+        assert_eq!(EnergyPerfPref::from_str("balance_performance"), EnergyPerfPref::BalancePerformance);
+        assert_eq!(EnergyPerfPref::from_str("balance_power"), EnergyPerfPref::BalancePower);
+        assert_eq!(EnergyPerfPref::from_str("power"), EnergyPerfPref::Power);
+        assert_eq!(EnergyPerfPref::from_str("invalid"), EnergyPerfPref::Unknown);
+        assert_eq!(EnergyPerfPref::from_str("  BALANCE_POWER  "), EnergyPerfPref::BalancePower);
+    }
+
+    #[test]
+    fn test_epp_unknown_produces_empty() {
+        let epp = EnergyPerfPref::Unknown;
+        assert!(epp.as_str().is_empty());
     }
 }
