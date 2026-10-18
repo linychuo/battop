@@ -201,10 +201,10 @@ fn main() {
 
             if battery {
                 info!("switched to battery mode");
-                apply_profile(&config.battery, &charge);
+                apply_profile(&config.battery, &charge, false);
             } else {
                 info!("switched to charger mode");
-                apply_profile(&config.charger, &charge);
+                apply_profile(&config.charger, &charge, true);
             }
         }
 
@@ -221,12 +221,12 @@ fn main() {
     sd_notify_stopping(&notify_socket);
 
     info!("battop shutting down, restoring charger profile");
-    apply_profile(&config.charger, &charge);
+    apply_profile(&config.charger, &charge, true);
 
     info!("battop stopped");
 }
 
-fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl) {
+fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl, is_charger: bool) {
     let governor = Governor::from_str(&profile.governor);
     info!(
         "applying profile: governor={}, turbo={}",
@@ -264,8 +264,12 @@ fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl) {
         }
     }
 
-    // Apply charge thresholds if hardware supports it
-    apply_charge_thresholds(profile, charge);
+    // Only apply charge thresholds when on charger — applying them on battery
+    // mode is useless because they get immediately overwritten on the next
+    // mode switch (plug-in).
+    if is_charger {
+        apply_charge_thresholds(profile, charge);
+    }
 }
 
 fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeControl) {

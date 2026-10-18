@@ -47,14 +47,12 @@ Edit `~/.config/battop/battop.toml` (or `/etc/battop/battop.toml`):
 [battery]
 governor = "powersave"
 turbo = "never"
-charge_stop_threshold = 80
-charge_start_threshold = 40
 
 [charger]
 governor = "performance"
 turbo = "auto"
-charge_stop_threshold = 100
-charge_start_threshold = 0
+charge_stop_threshold = 80
+charge_start_threshold = 40
 
 [general]
 poll_interval_secs = 5
