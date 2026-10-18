@@ -1,6 +1,49 @@
 use std::fs;
 use std::path::Path;
 
+// ── Platform Profile ─────────────────────────────────────────────────
+// Firmware-level power/performance profile via ACPI
+// Path: /sys/firmware/acpi/platform_profile
+// Available on most laptops from ~2020+
+
+const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
+const PLATFORM_PROFILE_CHOICES_PATH: &str = "/sys/firmware/acpi/platform_profile_choices";
+
+/// Check if Platform Profile is supported on this hardware
+pub fn platform_profile_is_supported() -> bool {
+    Path::new(PLATFORM_PROFILE_PATH).exists()
+}
+
+/// Read current Platform Profile
+pub fn platform_profile_current() -> Option<String> {
+    fs::read_to_string(PLATFORM_PROFILE_PATH)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Read available Platform Profile choices (space-separated)
+pub fn platform_profile_choices() -> Vec<String> {
+    match fs::read_to_string(PLATFORM_PROFILE_CHOICES_PATH) {
+        Ok(content) => content
+            .split_whitespace()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Set Platform Profile
+pub fn set_platform_profile(profile: &str) -> std::io::Result<()> {
+    if !platform_profile_is_supported() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "platform profile not supported on this hardware",
+        ));
+    }
+    fs::write(PLATFORM_PROFILE_PATH, profile)
+}
+
 // ── EPP (Energy Performance Preference) ──────────────────────────────
 // Available on Intel (Skylake+) and AMD (Zen 2+) with `schedutil`/`performance` governors
 
@@ -261,6 +304,14 @@ pub fn set_turbo(enabled: bool) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_platform_profile_not_supported_on_this_machine() {
+        // i3-3120M doesn't have platform profile, but the functions shouldn't panic
+        let _ = platform_profile_is_supported();
+        let _ = platform_profile_current();
+        let _ = platform_profile_choices();
+    }
 
     #[test]
     fn test_governor_as_str() {

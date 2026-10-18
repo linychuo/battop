@@ -6,6 +6,7 @@ Linux battery-aware CPU power management daemon, written in Rust.
 
 - Automatic CPU governor switching (battery vs charger)
 - Turbo boost control (Intel & AMD)
+- Platform Profile control (firmware-level power/performance)
 - Energy Performance Preference (EPP) control (Intel Skylake+, AMD Zen 2+)
 - CPU frequency limit control (scaling_min_freq / scaling_max_freq)
 - Power draw monitoring via sysfs
@@ -50,12 +51,14 @@ Edit `~/.config/battop/battop.toml` (or `/etc/battop/battop.toml`):
 governor = "powersave"
 turbo = "never"
 energy_performance_preference = "balance_power"
+platform_profile = "low-power"
 max_freq = 2000000  # 2.0 GHz in kHz
 
 [charger]
 governor = "performance"
 turbo = "auto"
 energy_performance_preference = "balance_performance"
+platform_profile = "performance"
 
 [charge_control]
 stop_threshold = 80
@@ -73,6 +76,7 @@ log_level = "info"
 | battery/charger | governor | performance, powersave, conservative, ondemand, userspace, schedutil | — |
 | battery/charger | turbo | never, auto | — |
 | battery/charger | energy_performance_preference | performance, balance_performance, balance_power, power | unset (hardware default) |
+| battery/charger | platform_profile | low-power, balanced, balanced-performance, performance, quiet, cool, power | unset (hardware default) |
 | battery/charger | max_freq | integer kHz | unset (hardware default) |
 | battery/charger | min_freq | integer kHz | unset (hardware default) |
 | charge_control | stop_threshold | 0-100 (optional) | none |
@@ -83,5 +87,6 @@ log_level = "info"
 
 **Notes:**
 - `energy_performance_preference` requires hardware support (Intel Skylake+ or AMD Zen 2+). Battop logs a message and skips if unsupported.
+- `platform_profile` requires firmware support (most laptops from ~2020+). Values vary by OEM. Battop logs available choices at startup and skips if unsupported.
 - `max_freq` and `min_freq` are in kHz (e.g., `2000000` = 2.0 GHz). Values must be within `cpuinfo_min_freq`–`cpuinfo_max_freq` range.
-- EPP and frequency limits are only applied when the corresponding options are set in config.
+- All options are optional. Only set values are applied; unset options preserve hardware defaults.

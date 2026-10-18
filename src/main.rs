@@ -5,7 +5,7 @@ mod power_supply;
 
 use charge_control::ChargeControl;
 use config::Config;
-use cpu_governor::{set_epp, set_governor_all, set_max_freq, set_min_freq, set_turbo, EnergyPerfPref, Governor};
+use cpu_governor::{set_epp, set_governor_all, set_max_freq, set_min_freq, set_platform_profile, set_turbo, EnergyPerfPref, Governor};
 
 
 use log::info;
@@ -166,6 +166,12 @@ fn main() {
         cpu_governor::freq_min_limit_hz(),
         cpu_governor::freq_max_limit_hz()
     );
+    info!(
+        "hardware: platform profile supported={}, current={:?}, choices={:?}",
+        cpu_governor::platform_profile_is_supported(),
+        cpu_governor::platform_profile_current(),
+        cpu_governor::platform_profile_choices()
+    );
 
     // Check if running on a system without battery (desktop)
     let supplies = power_supply::detect_supplies();
@@ -261,6 +267,17 @@ fn apply_profile(
 
     if let Err(e) = set_governor_all(governor) {
         log::error!("failed to set governor: {}", e);
+    }
+
+    // ── Platform Profile (firmware-level power/performance) ──────
+    if let Some(ref pp_str) = profile.platform_profile {
+        if !cpu_governor::platform_profile_is_supported() {
+            log::info!("Platform Profile not supported on this hardware, skipping");
+        } else if let Err(e) = set_platform_profile(pp_str) {
+            log::warn!("failed to set platform profile '{}': {}", pp_str, e);
+        } else {
+            info!("set platform profile to '{}'", pp_str);
+        }
     }
 
     // ── EPP (Energy Performance Preference) ──────────────────────

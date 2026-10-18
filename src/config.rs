@@ -14,6 +14,8 @@ pub struct ProfileConfig {
     #[serde(default)]
     pub energy_performance_preference: Option<String>,
     #[serde(default)]
+    pub platform_profile: Option<String>,
+    #[serde(default)]
     pub max_freq: Option<u64>,
     #[serde(default)]
     pub min_freq: Option<u64>,
@@ -58,6 +60,7 @@ impl Default for Config {
                 governor: "powersave".to_string(),
                 turbo: "never".to_string(),
                 energy_performance_preference: None,
+                platform_profile: None,
                 max_freq: None,
                 min_freq: None,
             },
@@ -65,6 +68,7 @@ impl Default for Config {
                 governor: "performance".to_string(),
                 turbo: "auto".to_string(),
                 energy_performance_preference: None,
+                platform_profile: None,
                 max_freq: None,
                 min_freq: None,
             },
@@ -120,6 +124,8 @@ impl Config {
         Self::validate_turbo("charger.turbo", &self.charger.turbo);
         Self::validate_epp("battery.energy_performance_preference", &self.battery.energy_performance_preference);
         Self::validate_epp("charger.energy_performance_preference", &self.charger.energy_performance_preference);
+        Self::validate_platform_profile("battery.platform_profile", &self.battery.platform_profile);
+        Self::validate_platform_profile("charger.platform_profile", &self.charger.platform_profile);
         Self::validate_freq("battery.max_freq", self.battery.max_freq, "kHz");
         Self::validate_freq("battery.min_freq", self.battery.min_freq, "kHz");
         Self::validate_freq("charger.max_freq", self.charger.max_freq, "kHz");
@@ -173,6 +179,19 @@ impl Config {
             if matches!(epp, EnergyPerfPref::Unknown) {
                 config_warn(&format!(
                     "{} = '{}' is not valid; expected one of: performance, balance_performance, balance_power, power",
+                    name, v
+                ));
+            }
+        }
+    }
+
+    fn validate_platform_profile(name: &str, value: &Option<String>) {
+        if let Some(v) = value {
+            let valid = ["low-power", "power", "quiet", "cool",
+                         "balanced", "balanced-performance", "performance"];
+            if !valid.contains(&v.as_str()) {
+                config_warn(&format!(
+                    "{} = '{}' is not a recognized platform profile; common values: low-power, balanced, performance",
                     name, v
                 ));
             }

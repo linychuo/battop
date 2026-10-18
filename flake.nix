@@ -39,6 +39,10 @@
               type = eppType;
               default = null;
             };
+            platform_profile = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
             max_freq = lib.mkOption {
               type = freqType;
               default = null;
@@ -55,6 +59,9 @@
         }
           // lib.optionalAttrs (profile.energy_performance_preference != null) {
             energy_performance_preference = profile.energy_performance_preference;
+          }
+          // lib.optionalAttrs (profile.platform_profile != null) {
+            platform_profile = profile.platform_profile;
           }
           // lib.optionalAttrs (profile.max_freq != null) {
             max_freq = profile.max_freq;
