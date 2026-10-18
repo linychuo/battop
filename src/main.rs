@@ -10,6 +10,7 @@ use cpu_governor::{set_governor_all, set_turbo, Governor};
 
 use log::info;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
+use std::os::unix::net::UnixDatagram;
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -178,12 +179,18 @@ fn main() {
         },
     );
 
-    // Notify systemd we're ready
-    sd_notify_ready();
+    // Open systemd notification socket (used for both READY and WATCHDOG)
+    let notify_socket = sd_notify_get_socket();
 
     let mut last_on_battery: Option<bool> = None;
 
+    // Notify systemd we're fully ready
+    sd_notify_ready(&notify_socket);
+
     while running.load(Ordering::SeqCst) {
+        // Send watchdog keepalive
+        sd_notify_watchdog(&notify_socket);
+
         // Scan sysfs once per poll cycle — pass results to all consumers
         let supplies = power_supply::detect_supplies();
         let battery = power_supply::on_battery_with(&supplies);
@@ -209,6 +216,9 @@ fn main() {
 
         thread::sleep(Duration::from_secs(config.poll_interval_secs()));
     }
+
+    // Notify systemd about shutdown
+    sd_notify_stopping(&notify_socket);
 
     info!("battop shutting down, restoring charger profile");
     apply_profile(&config.charger, &charge);
@@ -294,17 +304,40 @@ fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeContr
     }
 }
 
-/// Notify systemd that the service is ready.
-/// Uses the systemd notification socket (NOTIFY_SOCKET).
-fn sd_notify_ready() {
-    if let Ok(socket) = std::env::var("NOTIFY_SOCKET") {
-        let addr = std::path::Path::new(&socket);
-        if let Ok(socket) = std::os::unix::net::UnixDatagram::unbound() {
-            if socket.send_to(b"READY=1\n", addr).is_ok() {
-                info!("notified systemd: READY=1");
-            } else {
-                log::warn!("failed to send sd_notify READY");
-            }
+/// Get the systemd notification socket address from NOTIFY_SOCKET env var.
+/// Returns None if NOTIFY_SOCKET is not set or not a valid path.
+fn sd_notify_get_socket() -> Option<std::path::PathBuf> {
+    std::env::var("NOTIFY_SOCKET").ok().map(std::path::PathBuf::from)
+}
+
+/// Send a notification message via the systemd notification socket.
+fn sd_notify_send(addr: &std::path::Path, msg: &[u8]) {
+    if let Ok(socket) = UnixDatagram::unbound() {
+        if socket.send_to(msg, addr).is_err() {
+            log::warn!("failed to send sd_notify message");
         }
+    }
+}
+
+/// Notify systemd that the service is ready.
+fn sd_notify_ready(addr: &Option<std::path::PathBuf>) {
+    if let Some(addr) = addr {
+        sd_notify_send(addr, b"READY=1\n");
+        info!("notified systemd: READY=1");
+    }
+}
+
+/// Send watchdog keepalive to systemd.
+fn sd_notify_watchdog(addr: &Option<std::path::PathBuf>) {
+    if let Some(addr) = addr {
+        sd_notify_send(addr, b"WATCHDOG=1\n");
+    }
+}
+
+/// Notify systemd that the service is stopping.
+fn sd_notify_stopping(addr: &Option<std::path::PathBuf>) {
+    if let Some(addr) = addr {
+        sd_notify_send(addr, b"STOPPING=1\n");
+        info!("notified systemd: STOPPING=1");
     }
 }

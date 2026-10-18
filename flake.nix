@@ -151,7 +151,7 @@
 
             serviceConfig = {
               Type = "notify";
-              ExecStart = "${cfg.package}/bin/battop";
+              ExecStart = "${cfg.package}/bin/battop -c /etc/battop/battop.toml";
               Restart = "on-failure";
               RestartSec = "5s";
               WatchdogSec = "30s";
