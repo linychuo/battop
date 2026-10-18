@@ -49,6 +49,19 @@
             };
           };
         };
+
+        mkProfile = profile: {
+          inherit (profile) governor turbo;
+        }
+          // lib.optionalAttrs (profile.energy_performance_preference != null) {
+            energy_performance_preference = profile.energy_performance_preference;
+          }
+          // lib.optionalAttrs (profile.max_freq != null) {
+            max_freq = profile.max_freq;
+          }
+          // lib.optionalAttrs (profile.min_freq != null) {
+            min_freq = profile.min_freq;
+          };
       in
       {
         options.services.battop = {
@@ -106,20 +119,6 @@
 
         config = lib.mkIf config.services.battop.enable {
           environment.systemPackages = [ pkg ];
-
-          # Build profile sections with optional fields
-          mkProfile = profile: {
-            inherit (profile) governor turbo;
-          }
-            // lib.optionalAttrs (profile.energy_performance_preference != null) {
-              energy_performance_preference = profile.energy_performance_preference;
-            }
-            // lib.optionalAttrs (profile.max_freq != null) {
-              max_freq = profile.max_freq;
-            }
-            // lib.optionalAttrs (profile.min_freq != null) {
-              min_freq = profile.min_freq;
-            };
 
           environment.etc."battop/battop.toml".source =
             toml.generate "battop.toml" {
