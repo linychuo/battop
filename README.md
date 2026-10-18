@@ -6,6 +6,9 @@
 [![Platform](https://img.shields.io/badge/platform-linux-blue)](https://kernel.org)
 [![Binary](https://img.shields.io/badge/binary-single%20binary-brightgreen)]()
 [![Deps](https://img.shields.io/badge/runtime%20dependencies-zero-success)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
+
+[English](README.en.md) | 简体中文
 
 Battop 是一个 Linux 电池感知的 CPU 电源管理守护进程，在插拔电时自动切换电源策略。
 
