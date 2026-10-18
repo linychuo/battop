@@ -11,15 +11,21 @@ fn config_warn(msg: &str) {
 pub struct ProfileConfig {
     pub governor: String,
     pub turbo: String,
-    pub charge_stop_threshold: Option<u32>,
-    pub charge_start_threshold: Option<u32>,
-    pub charge_behaviour: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ChargeControlConfig {
+    pub stop_threshold: Option<u32>,
+    pub start_threshold: Option<u32>,
+    pub behaviour: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub battery: ProfileConfig,
     pub charger: ProfileConfig,
+    #[serde(default)]
+    pub charge_control: ChargeControlConfig,
     pub general: GeneralConfig,
 }
 
@@ -45,16 +51,15 @@ impl Default for Config {
             battery: ProfileConfig {
                 governor: "powersave".to_string(),
                 turbo: "never".to_string(),
-                charge_stop_threshold: None,
-                charge_start_threshold: None,
-                charge_behaviour: None,
             },
             charger: ProfileConfig {
                 governor: "performance".to_string(),
                 turbo: "auto".to_string(),
-                charge_stop_threshold: None,
-                charge_start_threshold: None,
-                charge_behaviour: None,
+            },
+            charge_control: ChargeControlConfig {
+                stop_threshold: None,
+                start_threshold: None,
+                behaviour: None,
             },
             general: GeneralConfig {
                 poll_interval_secs: 5,
@@ -97,35 +102,22 @@ impl Config {
     }
 
     pub fn validate(&self) {
-        // Validate governor values
         Self::validate_governor("battery.governor", &self.battery.governor);
         Self::validate_governor("charger.governor", &self.charger.governor);
-
-        // Validate turbo values
         Self::validate_turbo("battery.turbo", &self.battery.turbo);
         Self::validate_turbo("charger.turbo", &self.charger.turbo);
 
-        // Validate poll interval
         if self.general.poll_interval_secs == 0 {
             config_warn("poll_interval_secs is 0, busy-loop possible; consider setting >= 1");
         }
 
-        // Validate charge thresholds
         Self::validate_threshold(
-            "battery.charge_stop_threshold",
-            self.battery.charge_stop_threshold,
+            "charge_control.stop_threshold",
+            self.charge_control.stop_threshold,
         );
         Self::validate_threshold(
-            "battery.charge_start_threshold",
-            self.battery.charge_start_threshold,
-        );
-        Self::validate_threshold(
-            "charger.charge_stop_threshold",
-            self.charger.charge_stop_threshold,
-        );
-        Self::validate_threshold(
-            "charger.charge_start_threshold",
-            self.charger.charge_start_threshold,
+            "charge_control.start_threshold",
+            self.charge_control.start_threshold,
         );
     }
 
@@ -176,12 +168,15 @@ mod tests {
 [battery]
 governor = "powersave"
 turbo = "never"
-charge_stop_threshold = 80
 
 [charger]
 governor = "performance"
 turbo = "auto"
-charge_stop_threshold = 100
+
+[charge_control]
+stop_threshold = 80
+start_threshold = 40
+behaviour = "auto"
 
 [general]
 poll_interval_secs = 10
@@ -189,33 +184,34 @@ log_level = "debug"
 "#;
         let config = toml::from_str::<Config>(toml_str).expect("should parse");
         assert_eq!(config.battery.governor, "powersave");
-        assert_eq!(config.battery.charge_stop_threshold, Some(80));
-        assert_eq!(config.charger.governor, "performance");
         assert_eq!(config.battery.turbo, "never");
+        assert_eq!(config.charger.governor, "performance");
         assert_eq!(config.charger.turbo, "auto");
+        assert_eq!(config.charge_control.stop_threshold, Some(80));
+        assert_eq!(config.charge_control.start_threshold, Some(40));
+        assert_eq!(config.charge_control.behaviour, Some("auto".to_string()));
         assert_eq!(config.general.poll_interval_secs, 10);
         assert_eq!(config.general.log_level, "debug");
     }
 
     #[test]
     fn test_parse_partial_config_uses_defaults() {
-        // Missing optional fields should still parse
         let toml_str = r#"
 [battery]
-governor = "performance"
-turbo = "auto"
-
-[charger]
 governor = "powersave"
 turbo = "never"
+
+[charger]
+governor = "performance"
+turbo = "auto"
 
 [general]
 poll_interval_secs = 3
 log_level = "warn"
 "#;
         let config = toml::from_str::<Config>(toml_str).expect("should parse");
-        assert_eq!(config.battery.governor, "performance");
-        assert_eq!(config.battery.charge_stop_threshold, None);
+        assert_eq!(config.charge_control.stop_threshold, None);
+        assert_eq!(config.charge_control.start_threshold, None);
         assert_eq!(config.general.poll_interval_secs, 3);
     }
 

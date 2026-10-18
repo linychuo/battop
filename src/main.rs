@@ -35,12 +35,14 @@ Config file (TOML format):
     [battery]
     governor = \"powersave\"
     turbo = \"never\"
-    charge_stop_threshold = 80
 
     [charger]
     governor = \"performance\"
     turbo = \"auto\"
-    charge_stop_threshold = 100
+
+    [charge_control]
+    stop_threshold = 80
+    start_threshold = 40
 
     [general]
     poll_interval_secs = 5
@@ -201,10 +203,10 @@ fn main() {
 
             if battery {
                 info!("switched to battery mode");
-                apply_profile(&config.battery, &charge, false);
+                apply_profile(&config.battery, &config.charge_control, &charge);
             } else {
                 info!("switched to charger mode");
-                apply_profile(&config.charger, &charge, true);
+                apply_profile(&config.charger, &config.charge_control, &charge);
             }
         }
 
@@ -221,12 +223,16 @@ fn main() {
     sd_notify_stopping(&notify_socket);
 
     info!("battop shutting down, restoring charger profile");
-    apply_profile(&config.charger, &charge, true);
+    apply_profile(&config.charger, &config.charge_control, &charge);
 
     info!("battop stopped");
 }
 
-fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl, is_charger: bool) {
+fn apply_profile(
+    profile: &config::ProfileConfig,
+    charge_control: &config::ChargeControlConfig,
+    charge: &ChargeControl,
+) {
     let governor = Governor::from_str(&profile.governor);
     info!(
         "applying profile: governor={}, turbo={}",
@@ -264,20 +270,17 @@ fn apply_profile(profile: &config::ProfileConfig, charge: &ChargeControl, is_cha
         }
     }
 
-    // Only apply charge thresholds when on charger — applying them on battery
-    // mode is useless because they get immediately overwritten on the next
-    // mode switch (plug-in).
-    if is_charger {
-        apply_charge_thresholds(profile, charge);
-    }
+    // Charge thresholds are global — they only take effect when plugged in,
+    // so we apply them on every profile switch.
+    apply_charge_thresholds(charge_control, charge);
 }
 
-fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeControl) {
+fn apply_charge_thresholds(cc: &config::ChargeControlConfig, charge: &ChargeControl) {
     if !charge.supported {
         return;
     }
 
-    if let Some(threshold) = profile.charge_stop_threshold
+    if let Some(threshold) = cc.stop_threshold
         && charge.has_end_threshold
     {
         if let Err(e) = charge.set_end_threshold(threshold) {
@@ -287,7 +290,7 @@ fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeContr
         }
     }
 
-    if let Some(threshold) = profile.charge_start_threshold
+    if let Some(threshold) = cc.start_threshold
         && charge.has_start_threshold
     {
         if let Err(e) = charge.set_start_threshold(threshold) {
@@ -297,7 +300,7 @@ fn apply_charge_thresholds(profile: &config::ProfileConfig, charge: &ChargeContr
         }
     }
 
-    if let Some(ref behaviour) = profile.charge_behaviour
+    if let Some(ref behaviour) = cc.behaviour
         && charge.has_behaviour
     {
         if let Err(e) = charge.set_behaviour(behaviour) {

@@ -51,8 +51,10 @@ turbo = "never"
 [charger]
 governor = "performance"
 turbo = "auto"
-charge_stop_threshold = 80
-charge_start_threshold = 40
+
+[charge_control]
+stop_threshold = 80
+start_threshold = 40
 
 [general]
 poll_interval_secs = 5
@@ -65,8 +67,8 @@ log_level = "info"
 |---------|-----|--------|---------|
 | battery/charger | governor | performance, powersave, conservative, ondemand, userspace, schedutil | — |
 | battery/charger | turbo | never, auto | — |
-| battery/charger | charge_stop_threshold | 0-100 (optional) | none |
-| battery/charger | charge_start_threshold | 0-100 (optional) | none |
-| battery/charger | charge_behaviour | auto, inhibit-charge, force-discharge | none |
+| charge_control | stop_threshold | 0-100 (optional) | none |
+| charge_control | start_threshold | 0-100 (optional) | none |
+| charge_control | behaviour | auto, inhibit-charge, force-discharge | none |
 | general | poll_interval_secs | 1+ | 5 |
 | general | log_level | error, warn, info, debug, trace | info |
