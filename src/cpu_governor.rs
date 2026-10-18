@@ -177,6 +177,22 @@ pub fn get_min_freq() -> Option<u64> {
         .and_then(|s| s.trim().parse().ok())
 }
 
+/// Read current governor for cpu0
+#[allow(dead_code)]
+pub fn get_governor() -> Option<String> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Read current frequency from cpu0 (kHz)
+#[allow(dead_code)]
+pub fn get_cur_freq() -> Option<u64> {
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
 // ── Governor & Turbo ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

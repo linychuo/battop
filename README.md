@@ -37,10 +37,37 @@ sudo battop
 
 ```
 -c, --config <PATH>    Config file path (default: ~/.config/battop/battop.toml)
+    --stats            Display current system power stats
     --dry-run          Load config and validate, then exit
 -h, --help             Print help message
 -v, --version          Print version
 ```
+
+## Stats (no daemon required)
+
+Display current system power state without running the daemon:
+
+```bash
+sudo battop --stats
+```
+
+Output:
+
+```
+  Battop 0.1.0 — System Stats
+
+  Power source:   battery (8.2W discharge)
+  Battery:        🔋 67% (discharging)
+
+  CPU:
+  Governor:       powersave
+  Turbo:          off
+  Frequency:      1800 MHz
+  Freq range:     1200 – 2500 MHz
+  Hardware limit: 1200 – 2500 MHz
+  EPP:            balance_power
+```
+
 
 ## Configuration
 

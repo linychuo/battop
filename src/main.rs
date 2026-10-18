@@ -6,7 +6,97 @@ mod power_supply;
 use charge_control::ChargeControl;
 use config::Config;
 use cpu_governor::{set_epp, set_governor_all, set_max_freq, set_min_freq, set_platform_profile, set_turbo, EnergyPerfPref, Governor};
+use power_supply::PowerStatus;
 
+fn print_stats() {
+    let supplies = power_supply::detect_supplies();
+    let on_battery = power_supply::on_battery_with(&supplies);
+
+    println!("\n  Battop {} — System Stats\n", VERSION);
+
+    // Power source
+    let status_str = if on_battery { "battery" } else { "AC/charger" };
+    if let Some(power) = power_supply::battery_power_draw_watts(&supplies) {
+        if on_battery {
+            println!("  Power source:   {} ({:.1}W discharge)", status_str, power);
+        } else {
+            println!("  Power source:   {} ({:.1}W draw)", status_str, power);
+        }
+    } else {
+        println!("  Power source:   {}", status_str);
+    }
+
+    // Battery capacity
+    if let Some(cap) = power_supply::battery_capacity(&supplies) {
+        let battery = supplies.iter().find(|s| matches!(s.supply_type, power_supply::SupplyType::Battery));
+        let status = battery.map(|b| &b.status).unwrap_or(&PowerStatus::Unknown);
+        let status_icon = match status {
+            PowerStatus::Charging => "⚡",
+            PowerStatus::Discharging => "🔋",
+            PowerStatus::Full => "✓",
+            _ => "",
+        };
+        println!("  Battery:        {} {}% {}", status_icon, cap, battery_status_str(status));
+    }
+
+    // CPU info
+    println!("\n  CPU:\n");
+
+    // Governor
+    if let Some(gov) = cpu_governor::get_governor() {
+        println!("  Governor:       {}", gov);
+    } else {
+        println!("  Governor:       unavailable");
+    }
+
+    // Turbo
+    if let Some(turbo) = cpu_governor::get_turbo() {
+        println!("  Turbo:          {}", if turbo { "on" } else { "off" });
+    }
+
+    // Current frequency
+    if let Some(freq) = cpu_governor::get_cur_freq() {
+        println!("  Frequency:      {:.0} MHz", freq as f64 / 1000.0);
+    }
+
+    // Frequency limits
+    if let (Some(min), Some(max)) = (cpu_governor::get_min_freq(), cpu_governor::get_max_freq()) {
+        println!("  Freq range:     {:.0} – {:.0} MHz", min as f64 / 1000.0, max as f64 / 1000.0);
+    }
+    if let (Some(min_limit), Some(max_limit)) = (cpu_governor::freq_min_limit_hz(), cpu_governor::freq_max_limit_hz()) {
+        println!("  Hardware limit: {:.0} – {:.0} MHz", min_limit as f64 / 1000.0, max_limit as f64 / 1000.0);
+    }
+
+    // EPP
+    if EnergyPerfPref::is_supported() {
+        if let Some(epp) = cpu_governor::get_epp() {
+            if !matches!(epp, EnergyPerfPref::Unknown) {
+                println!("  EPP:            {}", epp.as_str());
+            }
+        }
+        println!("  EPP choices:    [{}]", EnergyPerfPref::available_values().join(", "));
+    }
+
+    // Platform Profile
+    if cpu_governor::platform_profile_is_supported() {
+        if let Some(pp) = cpu_governor::platform_profile_current() {
+            println!("  Platform Prof:  {}", pp);
+        }
+        println!("  PP choices:     [{}]", cpu_governor::platform_profile_choices().join(", "));
+    }
+
+    println!();
+}
+
+fn battery_status_str(status: &PowerStatus) -> &'static str {
+    match status {
+        PowerStatus::Charging => "(charging)",
+        PowerStatus::Discharging => "(discharging)",
+        PowerStatus::Full => "(full)",
+        PowerStatus::NotCharging => "(not charging)",
+        PowerStatus::Unknown => "",
+    }
+}
 
 use log::info;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
@@ -27,6 +117,7 @@ Usage: battop [OPTIONS]
 
 Options:
     -c, --config <PATH>    Config file path (default: ~/.config/battop/battop.toml)
+        --stats            Display current system power stats
         --dry-run          Load config and validate, then exit
     -h, --help             Print this help message
     -v, --version          Print version
@@ -59,6 +150,7 @@ fn print_version() {
 struct CliArgs {
     config_path: Option<String>,
     dry_run: bool,
+    stats: bool,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
@@ -66,6 +158,7 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut result = CliArgs {
         config_path: None,
         dry_run: false,
+        stats: false,
     };
 
     let mut i = 1;
@@ -89,6 +182,9 @@ fn parse_args() -> Result<CliArgs, String> {
             "--dry-run" => {
                 result.dry_run = true;
             }
+            "--stats" => {
+                result.stats = true;
+            }
             other => {
                 return Err(format!("unknown argument: {}", other));
             }
@@ -104,7 +200,7 @@ fn main() {
         Ok(args) => args,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("Usage: battop [--help|--version|--config <PATH>|--dry-run]");
+            eprintln!("Usage: battop [--help|--version|--config <PATH>|--stats|--dry-run]");
             process::exit(1);
         }
     };
@@ -123,6 +219,11 @@ fn main() {
     }
 
     info!("battop {} starting...", VERSION);
+
+    if cli.stats {
+        print_stats();
+        process::exit(0);
+    }
 
     if cli.dry_run {
         info!("dry-run mode: config loaded successfully, exiting");
