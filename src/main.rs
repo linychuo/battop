@@ -205,6 +205,12 @@ fn main() {
         }
     };
 
+    // --stats mode: skip config loading entirely
+    if cli.stats {
+        print_stats();
+        process::exit(0);
+    }
+
     let config_path = cli
         .config_path
         .unwrap_or_else(Config::default_path);
@@ -219,11 +225,6 @@ fn main() {
     }
 
     info!("battop {} starting...", VERSION);
-
-    if cli.stats {
-        print_stats();
-        process::exit(0);
-    }
 
     if cli.dry_run {
         info!("dry-run mode: config loaded successfully, exiting");
